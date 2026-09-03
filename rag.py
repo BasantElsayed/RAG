@@ -245,29 +245,131 @@ def rewrite_query(question, memory, llm):
         print(f"Query rewriting error: {e}. Using original question.")
         return question
 
+DECOMPOSE_PROMPT_TEMPLATE = """You are a helpful medical assistant.
+Determine if the following question asks about MULTIPLE distinct drugs or medications.
+If it does, split it into separate, independent sub-questions, one for each drug.
+Return each sub-question on a new line.
+If the question is about a single drug or is a general question, output the original question exactly as is.
+Only output the questions, nothing else.
+
+Question: {question}
+"""
+
+def decompose_query(question, llm):
+    from langchain_core.messages import HumanMessage
+    prompt = DECOMPOSE_PROMPT_TEMPLATE.format(question=question)
+    try:
+        response = llm.invoke([HumanMessage(content=prompt)])
+        output = extract_text(response).strip()
+        # Clean up potential bullet points or numbers
+        queries = [q.strip("- *1234567890.") for q in output.split('\n') if q.strip()]
+        return queries if queries else [question]
+    except Exception as e:
+        print(f"Decomposition error: {e}")
+        return [question]
+# def rag_answer(question, collection, query_model, co, llm, memory=None,
+#                 top_k=5, alpha=0.5, candidates_n=20, min_rerank_score=0.3,
+#                 rerank_model="rerank-english-v3.0"):
+#     """
+#     Full Medical RAG pipeline:
+#     question -> (rewrite if memory) -> retrieve_and_rerank -> relevance check
+#              -> build_context -> prompt -> LLM -> answer + sources
+#     """
+#     from langchain_core.messages import HumanMessage
+
+#     if memory is not None:
+#         search_question = rewrite_query(question, memory, llm)
+#     else:
+#         search_question = question
+
+#     reranked = retrieve_and_rerank(
+#         search_question, collection, query_model, co,
+#         top_k=top_k, alpha=alpha, candidates_n=candidates_n,
+#         rerank_model=rerank_model,
+#     )
+
+#     if not is_context_relevant(reranked, min_score=min_rerank_score):
+#         answer = NO_ANSWER_MSG
+#         if memory is not None:
+#             memory.add(question, answer)
+#         return {
+#             "question": question,
+#             "search_question": search_question,
+#             "answer": answer,
+#             "sources": [],
+#         }
+
+#     context = build_context(reranked)
+#     prompt = build_prompt(search_question, context)
+
+#     try:
+#         response = llm.invoke([HumanMessage(content=prompt)])
+#         answer = extract_text(response)
+#     except Exception as e:
+#         print(f"LLM error: {e}")
+#         answer = (
+#             "Sorry, I couldn't generate an answer right now due to a "
+#             "technical issue. Please try again."
+#         )
+#         if memory is not None:
+#             memory.add(question, answer)
+#         return {
+#             "question": question,
+#             "search_question": search_question,
+#             "answer": answer,
+#             "sources": sources_as_dicts(reranked),
+#         }
+
+#     if memory is not None:
+#         memory.add(question, answer)
+
+#     return {
+#         "question": question,
+#         "search_question": search_question,
+#         "answer": answer,
+#         "sources": sources_as_dicts(reranked),
+#     }
 
 def rag_answer(question, collection, query_model, co, llm, memory=None,
-                top_k=5, alpha=0.5, candidates_n=20, min_rerank_score=0.3,
+                top_k=8, alpha=0.5, candidates_n=40, min_rerank_score=0.3,
                 rerank_model="rerank-english-v3.0"):
     """
-    Full Medical RAG pipeline:
-    question -> (rewrite if memory) -> retrieve_and_rerank -> relevance check
-             -> build_context -> prompt -> LLM -> answer + sources
+    Full Medical RAG pipeline with Query Decomposition:
+    question -> (rewrite) -> decompose -> retrieve_and_rerank (per sub-query) 
+             -> combine & deduplicate -> relevance check -> prompt -> LLM -> answer + sources
     """
     from langchain_core.messages import HumanMessage
 
+    # 1. Rewrite if there is conversation memory
     if memory is not None:
         search_question = rewrite_query(question, memory, llm)
     else:
         search_question = question
 
-    reranked = retrieve_and_rerank(
-        search_question, collection, query_model, co,
-        top_k=top_k, alpha=alpha, candidates_n=candidates_n,
-        rerank_model=rerank_model,
-    )
+    # 2. Decompose question into sub-queries (handles multi-drug queries)
+    sub_queries = decompose_query(search_question, llm)
+    print(f"Sub-queries generated: {sub_queries}") # For debugging in terminal
 
-    if not is_context_relevant(reranked, min_score=min_rerank_score):
+    all_reranked = []
+    seen_chunks = set()
+
+    # 3. Retrieve and Rerank for EACH sub-query
+    for q in sub_queries:
+        reranked = retrieve_and_rerank(
+            q, collection, query_model, co,
+            top_k=top_k, alpha=alpha, candidates_n=candidates_n,
+            rerank_model=rerank_model,
+        )
+        
+        # Deduplicate chunks to avoid sending the exact same context twice
+        for r in reranked:
+            chunk_id = f"{r.get('source_id', 'none')}_{r.get('chunk_index', 0)}"
+            if chunk_id not in seen_chunks:
+                seen_chunks.add(chunk_id)
+                all_reranked.append(r)
+
+    # 4. Relevance Check (if ALL chunks across all sub-queries failed the threshold)
+    if not is_context_relevant(all_reranked, min_score=min_rerank_score):
         answer = NO_ANSWER_MSG
         if memory is not None:
             memory.add(question, answer)
@@ -278,9 +380,11 @@ def rag_answer(question, collection, query_model, co, llm, memory=None,
             "sources": [],
         }
 
-    context = build_context(reranked)
+    # 5. Build Context and Prompt
+    context = build_context(all_reranked)
     prompt = build_prompt(search_question, context)
 
+    # 6. Generate LLM Answer
     try:
         response = llm.invoke([HumanMessage(content=prompt)])
         answer = extract_text(response)
@@ -296,9 +400,10 @@ def rag_answer(question, collection, query_model, co, llm, memory=None,
             "question": question,
             "search_question": search_question,
             "answer": answer,
-            "sources": sources_as_dicts(reranked),
+            "sources": sources_as_dicts(all_reranked),
         }
 
+    # 7. Save to memory and return
     if memory is not None:
         memory.add(question, answer)
 
@@ -306,10 +411,8 @@ def rag_answer(question, collection, query_model, co, llm, memory=None,
         "question": question,
         "search_question": search_question,
         "answer": answer,
-        "sources": sources_as_dicts(reranked),
+        "sources": sources_as_dicts(all_reranked),
     }
-
-
 def display_result(result):
     print("Q:", result["question"])
     if result["search_question"] != result["question"]:
