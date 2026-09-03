@@ -247,7 +247,7 @@ def rewrite_query(question, memory, llm):
 
 
 def rag_answer(question, collection, query_model, co, llm, memory=None,
-                top_k=5, alpha=0.5, candidates_n=20, min_rerank_score=0.3,
+                top_k=8, alpha=0.5, candidates_n=40, min_rerank_score=0.3,
                 rerank_model="rerank-english-v3.0"):
     """
     Full Medical RAG pipeline:
