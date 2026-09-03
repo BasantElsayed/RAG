@@ -1,0 +1,7 @@
+streamlit>=1.37
+weaviate-client>=4.6
+sentence-transformers>=2.7
+cohere>=5.5
+langchain-google-genai>=1.0
+langchain-core>=0.2
+numpy>=1.26
