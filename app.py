@@ -257,7 +257,7 @@ def get_cohere_client():
 @st.cache_resource(show_spinner=False)
 def get_llm():
     return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model="gemini-3.1-flash-lite",
         temperature=0,
         google_api_key=st.secrets["GOOGLE_API_KEY"],
     )
