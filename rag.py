@@ -248,6 +248,13 @@ def rewrite_query(question, memory, llm):
 DECOMPOSE_PROMPT_TEMPLATE = """You are a helpful medical assistant.
 Determine if the following question asks about MULTIPLE distinct drugs or medications.
 If it does, split it into separate, independent sub-questions, one for each drug.
+
+CRITICAL INSTRUCTION: 
+Each sub-question MUST explicitly include the specific medical section or intent being asked about (e.g., warnings, dosage, side effects). Do not lose the intent of the original question.
+For example, "Compare the warnings for sertraline and fentanyl" MUST become:
+- What are the warnings for sertraline?
+- What are the warnings for fentanyl?
+
 Return each sub-question on a new line.
 If the question is about a single drug or is a general question, output the original question exactly as is.
 Only output the questions, nothing else.
