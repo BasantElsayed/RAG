@@ -434,14 +434,47 @@ for msg in st.session_state.messages:
             render_sources(msg["sources"])
 
 
+# # ----------------------------------------------------------------------
+# # Chat input
+# # ----------------------------------------------------------------------
+# question = st.chat_input("Ask about a medication, e.g. \"What are the warnings for sertraline?\"")
+
+# if question:
+#     st.session_state.messages.append({"role": "user", "content": question})
+
+#     with st.spinner("Searching the medical label corpus..."):
+#         result = rag_answer(
+#             question,
+#             collection=collection,
+#             query_model=query_model,
+#             co=co,
+#             llm=llm,
+#             memory=st.session_state.memory,
+#             top_k=top_k,
+#             min_rerank_score=min_score,
+#         )
+
+#     st.session_state.messages.append(
+#         {
+#             "role": "assistant",
+#             "content": result["answer"],
+#             "sources": result["sources"],
+#         }
+#     )
+
+#     st.rerun()
+
 # ----------------------------------------------------------------------
-# Chat input
+# Chat input & Execution
 # ----------------------------------------------------------------------
 question = st.chat_input("Ask about a medication, e.g. \"What are the warnings for sertraline?\"")
 
 if question:
+    # 1. Append and Render User Message Immediately
     st.session_state.messages.append({"role": "user", "content": question})
+    st.markdown(f'<div class="msg-row user"><div class="bubble-user">{question}</div></div>', unsafe_allow_html=True)
 
+    # 2. Process Assistant Response
     with st.spinner("Searching the medical label corpus..."):
         result = rag_answer(
             question,
@@ -454,6 +487,7 @@ if question:
             min_rerank_score=min_score,
         )
 
+    # 3. Append Assistant Message to State
     st.session_state.messages.append(
         {
             "role": "assistant",
@@ -462,4 +496,14 @@ if question:
         }
     )
 
-    st.rerun()
+    # 4. Render Assistant Message Immediately
+    no_answer = result["answer"].strip().startswith("I don't know")
+    bubble_class = "bubble-assistant no-answer" if no_answer else "bubble-assistant"
+    
+    st.markdown(f'<div class="msg-row assistant"><div class="{bubble_class}">{result["answer"]}</div></div>', unsafe_allow_html=True)
+
+    if result.get("sources"):
+        with st.expander(f"Sources ({len(result['sources'])})"):
+            render_sources(result["sources"])
+            
+    # Note: No st.rerun() is called here.
