@@ -363,7 +363,7 @@ with st.sidebar:
     )
 
     with st.expander("Advanced settings"):
-        top_k = st.slider("Sources per answer", min_value=3, max_value=12, value=8)
+        top_k = st.slider("Sources per answer", min_value=3, max_value=8, value=5)
         min_score = st.slider(
             "Minimum relevance score", min_value=0.0, max_value=1.0, value=0.3, step=0.05
         )
