@@ -16,6 +16,23 @@ chunking, embeddings, or indexing -- only what happens after retrieval.
 
 from retrieval import retrieve_chunks
 
+SCOPE_PROMPT = """Determine if the following user question is related to medications, drugs, pharmacy, side effects, or medical conditions.
+Return ONLY "yes" or "no". Do not include any other text or punctuation.
+
+Question: {question}
+Answer:"""
+
+def is_in_scope(question, llm):
+    from langchain_core.messages import HumanMessage
+    prompt = SCOPE_PROMPT.format(question=question)
+    try:
+        response = llm.invoke([HumanMessage(content=prompt)])
+        answer = extract_text(response).strip().lower()
+        return 'yes' in answer
+    except Exception:
+        # Fallback to True so we don't accidentally block valid questions on API errors
+        return True
+
 
 NO_ANSWER_MSG = "I don't know based on the provided medical sources."
 
@@ -347,6 +364,17 @@ def rag_answer(question, collection, query_model, co, llm, memory=None,
     """
     from langchain_core.messages import HumanMessage
 
+    # 0. Scope Detection
+    if not is_in_scope(question, llm):
+        answer = "I only answer medication and pharmacy-related questions."
+        if memory is not None:
+            memory.add(question, answer)
+        return {
+            "question": question,
+            "search_question": question,
+            "answer": answer,
+            "sources": [],
+        }
     # 1. Rewrite if there is conversation memory
     if memory is not None:
         search_question = rewrite_query(question, memory, llm)
